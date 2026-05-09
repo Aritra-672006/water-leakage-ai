@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>HydroSense — AI Water Leak Detection</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #03080d;
+      --surface:   #080f17;
+      --card:      #0d1a26;
+      --border:    #122133;
+      --border2:   #1a3050;
+      --water:     #0af;
+      --water2:    #0066cc;
+      --safe:      #00e0a0;
+      --safe-glow: rgba(0,224,160,.15);
+      --leak:      #ff4040;
+      --leak-glow: rgba(255,64,64,.15);
+      --text:      #c8dff0;
+      --text2:     #6a90b0;
+      --text3:     #344f66;
+      --radius:    14px;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Background effects */
+    .orb {
+      position: fixed; border-radius: 50%;
+      filter: blur(90px); pointer-events: none; z-index: 0;
+    }
+    .orb-1 {
+      width: 500px; height: 500px;
+      background: radial-gradient(circle, rgba(0,102,204,.12), transparent 70%);
+      top: -80px; left: -80px;
+      animation: drift 14s ease-in-out infinite alternate;
+    }
+    .orb-2 {
+      width: 380px; height: 380px;
+      background: radial-gradient(circle, rgba(0,170,255,.07), transparent 70%);
+      bottom: 0; right: -60px;
+      animation: drift 18s ease-in-out infinite alternate-reverse;
+    }
+    @keyframes drift { from{transform:translate(0,0)} to{transform:translate(30px,40px)} }
+
+    body::after {
+      content: ''; position: fixed; inset: 0; z-index: 0;
+      background-image:
+        linear-gradient(rgba(0,170,255,.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,170,255,.025) 1px, transparent 1px);
+      background-size: 50px 50px; pointer-events: none;
+    }
+
+    /* Layout */
+    .page {
+      position: relative; z-index: 1;
+      max-width: 1020px; margin: 0 auto;
+      padding: 36px 20px 80px;
+    }
+
+    /* Header */
+    header {
+      display: flex; align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 40px; gap: 16px;
+      flex-wrap: wrap;
+    }
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .brand-icon {
+      width: 52px; height: 52px;
+      background: linear-gradient(135deg, var(--water2), var(--water));
+      border-radius: 13px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 24px;
+      box-shadow: 0 0 32px rgba(0,170,255,.3);
+    }
+    .brand-name {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 2.4rem; letter-spacing: 2px; line-height: 1; color: #fff;
+    }
+    .brand-sub {
+      font-family: 'DM Mono', monospace;
+      font-size: .62rem; color: var(--text2);
+      letter-spacing: .1em; margin-top: 4px;
+    }
+    .header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
+    .live-pill {
+      display: flex; align-items: center; gap: 7px;
+      background: rgba(0,224,160,.08);
+      border: 1px solid rgba(0,224,160,.25);
+      border-radius: 20px; padding: 6px 14px;
+      font-family: 'DM Mono', monospace;
+      font-size: .68rem; color: var(--safe);
+    }
+    .live-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--safe);
+      animation: blink 1.6s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
+    .server-tag {
+      font-family: 'DM Mono', monospace;
+      font-size: .62rem; color: var(--text3);
+    }
+
+    /* Alert */
+    .alert {
+      display: none; align-items: center; gap: 14px;
+      padding: 14px 20px; border-radius: var(--radius);
+      border: 1px solid rgba(255,64,64,.4);
+      background: rgba(255,64,64,.07);
+      margin-bottom: 18px; font-size: .88rem;
+    }
+    .alert.on { display: flex; animation: pop-in .35s ease; }
+    @keyframes pop-in { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:none} }
+    .alert-icon { font-size: 1.3rem; }
+    .alert-msg strong { color: var(--leak); }
+    .alert-close {
+      margin-left: auto; background: none; border: none;
+      color: var(--text2); font-size: 1rem; cursor: pointer;
+    }
+
+    /* Stats row */
+    .stats {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      gap: 12px; margin-bottom: 18px;
+    }
+    .stat {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 18px 16px;
+      transition: border-color .3s;
+    }
+    .stat:hover { border-color: var(--border2); }
+    .stat-lbl {
+      font-family: 'DM Mono', monospace;
+      font-size: .6rem; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--text2); margin-bottom: 7px;
+    }
+    .stat-val {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 2.1rem; line-height: 1; color: var(--water);
+    }
+    .stat-val.red { color: var(--leak); }
+    .stat-sub { font-family: 'DM Mono', monospace; font-size: .6rem; color: var(--text3); margin-top: 2px; }
+
+    /* Main grid */
+    .g-main { display: grid; grid-template-columns: 290px 1fr; gap: 14px; margin-bottom: 14px; }
+    .g-bot  { display: grid; grid-template-columns: 290px 1fr; gap: 14px; }
+
+    /* Card */
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 22px 20px;
+    }
+    .card-title {
+      font-family: 'DM Mono', monospace;
+      font-size: .62rem; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--text2);
+      margin-bottom: 20px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .card-title::before {
+      content: ''; display: inline-block;
+      width: 3px; height: 12px;
+      background: var(--water); border-radius: 2px;
+    }
+
+    /* Gauge */
+    .gauge-wrap { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+    .gauge-svg-box { position: relative; width: 190px; height: 190px; }
+    .gauge-svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+    .g-track { fill: none; stroke: var(--border); stroke-width: 10; }
+    .g-arc {
+      fill: none; stroke: var(--safe); stroke-width: 10;
+      stroke-linecap: round;
+      stroke-dasharray: 565.5; stroke-dashoffset: 565.5;
+      transition: stroke-dashoffset .9s cubic-bezier(.4,0,.2,1), stroke .4s, filter .4s;
+      filter: drop-shadow(0 0 8px var(--safe));
+    }
+    .gauge-mid {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+    }
+    .gauge-num {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 2.9rem; line-height: 1; color: #fff;
+      transition: color .4s;
+    }
+    .gauge-unit { font-family: 'DM Mono', monospace; font-size: .62rem; color: var(--text2); margin-top: 2px; }
+
+    .pill {
+      padding: 10px 26px; border-radius: 40px;
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 1.05rem; letter-spacing: 1.5px;
+      border: 1.5px solid var(--border2);
+      color: var(--text2); background: transparent;
+      transition: all .4s; text-align: center; width: 100%;
+    }
+    .pill.ok {
+      border-color: var(--safe); color: var(--safe);
+      background: var(--safe-glow);
+    }
+    .pill.bad {
+      border-color: var(--leak); color: var(--leak);
+      background: var(--leak-glow);
+      animation: shake .35s ease;
+    }
+    @keyframes shake {
+      0%,100%{transform:translateX(0)}
+      20%{transform:translateX(-6px)}
+      40%{transform:translateX(6px)}
+      60%{transform:translateX(-3px)}
+      80%{transform:translateX(3px)}
+    }
+
+    .drops { display: flex; gap: 6px; margin-top: 2px; }
+    .drop { font-size: .95rem; animation: drip 2s ease-in-out infinite; opacity: .4; }
+    .drop:nth-child(2) { animation-delay: .4s; }
+    .drop:nth-child(3) { animation-delay: .8s; }
+    @keyframes drip { 0%,100%{transform:translateY(0);opacity:.4} 50%{transform:translateY(4px);opacity:1} }
+    .drop.fast { animation: drip-fast .5s ease-in-out infinite; opacity:1; }
+    @keyframes drip-fast { 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(5px) scale(1.15)} }
+
+    /* Chart */
+    .chart-box { height: 218px; position: relative; }
+
+    /* Controls */
+    .range-row { margin-bottom: 16px; }
+    .range-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; }
+    .range-lbl { font-family: 'DM Mono', monospace; font-size: .68rem; color: var(--text2); letter-spacing: .06em; }
+    .range-num { font-family: 'Bebas Neue', sans-serif; font-size: 1.35rem; color: var(--water); letter-spacing: 1px; }
+
+    input[type=range] {
+      width: 100%; -webkit-appearance: none; appearance: none;
+      height: 6px; border-radius: 3px; outline: none; cursor: pointer;
+      background: linear-gradient(to right, var(--water2) 0%, var(--water2) var(--pct,20%), var(--border) var(--pct,20%));
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 19px; height: 19px;
+      border-radius: 50%; background: var(--water);
+      border: 3px solid var(--bg);
+      box-shadow: 0 0 10px rgba(0,170,255,.5);
+      cursor: pointer; transition: transform .15s;
+    }
+    input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.25); }
+
+    .range-ends {
+      display: flex; justify-content: space-between;
+      font-family: 'DM Mono', monospace; font-size: .58rem; color: var(--text3);
+      margin-top: 4px;
+    }
+
+    .divider {
+      text-align: center; font-family: 'DM Mono', monospace;
+      font-size: .62rem; color: var(--text3);
+      margin: 13px 0; position: relative;
+    }
+    .divider::before, .divider::after {
+      content: ''; position: absolute; top: 50%;
+      width: 42%; height: 1px; background: var(--border);
+    }
+    .divider::before { left: 0; } .divider::after { right: 0; }
+
+    .manual { display: flex; gap: 8px; margin-bottom: 14px; }
+    .field {
+      flex: 1; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 10px;
+      color: var(--text); font-family: 'DM Mono', monospace;
+      font-size: .88rem; padding: 10px 13px; outline: none;
+      transition: border-color .2s;
+    }
+    .field:focus { border-color: var(--water2); }
+    .field::placeholder { color: var(--text3); }
+
+    .btn {
+      display: block; width: 100%; padding: 13px;
+      border: none; border-radius: 10px;
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 1.05rem; letter-spacing: 1.5px;
+      cursor: pointer; transition: all .2s;
+    }
+    .btn-p {
+      background: linear-gradient(135deg, var(--water2), var(--water));
+      color: #fff; margin-bottom: 10px;
+      box-shadow: 0 4px 20px rgba(0,102,204,.3);
+    }
+    .btn-p:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(0,102,204,.5); }
+    .btn-p:active { transform: none; }
+    .btn-p:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+    .btn-s {
+      background: transparent; border: 1px solid var(--border2); color: var(--text2);
+    }
+    .btn-s:hover { border-color: var(--water); color: var(--water); }
+    .btn-s.on { border-color: var(--leak); color: var(--leak); }
+
+    /* Log */
+    .log-list {
+      list-style: none; display: flex; flex-direction: column;
+      gap: 7px; max-height: 255px; overflow-y: auto; padding-right: 4px;
+    }
+    .log-list::-webkit-scrollbar { width: 3px; }
+    .log-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+    .log-item {
+      display: grid; grid-template-columns: 100px 1fr auto;
+      align-items: center; gap: 10px;
+      padding: 9px 13px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--surface);
+      font-family: 'DM Mono', monospace; font-size: .71rem;
+      animation: slide-in .25s ease;
+    }
+    @keyframes slide-in { from{opacity:0;transform:translateY(-5px)} to{opacity:1;transform:none} }
+    .log-item.bad { border-color: rgba(255,64,64,.3); background: rgba(255,64,64,.04); }
+    .log-flow { color: var(--text2); }
+    .log-flow b { color: var(--text); font-weight: 500; }
+    .log-ok  { color: var(--safe); font-weight: 500; }
+    .log-bad { color: var(--leak); font-weight: 500; }
+    .log-ts  { color: var(--text3); font-size: .63rem; text-align: right; }
+    .log-placeholder {
+      text-align: center; font-family: 'DM Mono', monospace;
+      font-size: .73rem; color: var(--text3); padding: 28px 0;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed; bottom: 26px; right: 26px; z-index: 999;
+      background: #12050a; border: 1px solid var(--leak);
+      color: var(--leak); font-family: 'DM Mono', monospace;
+      font-size: .76rem; padding: 12px 18px; border-radius: 10px;
+      display: none; max-width: 320px;
+    }
+    .toast.on { display: block; animation: pop-in .3s ease; }
+
+    /* Responsive */
+    @media (max-width: 720px) {
+      .stats { grid-template-columns: repeat(2,1fr); }
+      .g-main, .g-bot { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 440px) {
+      .stats { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+
+<div class="page">
+
+  <!-- HEADER -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">💧</div>
+      <div>
+        <div class="brand-name">HYDROSENSE</div>
+        <div class="brand-sub">AI Smart Water Leakage Detection · BCA Project</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="live-pill"><div class="live-dot"></div> System Online</div>
+      <div class="server-tag">POST → http://127.0.0.1:5000/predict</div>
+    </div>
+  </header>
+
+  <!-- ALERT BANNER -->
+  <div class="alert" id="alertBox">
+    <span class="alert-icon">🚨</span>
+    <span class="alert-msg"><strong>LEAK DETECTED</strong> — Abnormal flow registered. Inspect pipeline immediately.</span>
+    <button class="alert-close" onclick="this.parentElement.classList.remove('on')">✕</button>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-lbl">Current Flow</div>
+      <div class="stat-val" id="sFlow">—</div>
+      <div class="stat-sub">litres / min</div>
+    </div>
+    <div class="stat">
+      <div class="stat-lbl">Total Readings</div>
+      <div class="stat-val" id="sTotal">0</div>
+      <div class="stat-sub">this session</div>
+    </div>
+    <div class="stat">
+      <div class="stat-lbl">Leaks Detected</div>
+      <div class="stat-val red" id="sLeaks">0</div>
+      <div class="stat-sub">anomalies</div>
+    </div>
+    <div class="stat">
+      <div class="stat-lbl">Last Status</div>
+      <div class="stat-val" id="sLast" style="font-size:1.2rem;color:var(--text2)">IDLE</div>
+      <div class="stat-sub">latest result</div>
+    </div>
+  </div>
+
+  <!-- MAIN GRID -->
+  <div class="g-main">
+
+    <!-- Gauge Card -->
+    <div class="card">
+      <div class="card-title">Live Reading</div>
+      <div class="gauge-wrap">
+        <div class="gauge-svg-box">
+          <svg class="gauge-svg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+            <circle class="g-track" cx="100" cy="100" r="90"/>
+            <circle class="g-arc"   cx="100" cy="100" r="90" id="gArc"/>
+          </svg>
+          <div class="gauge-mid">
+            <div class="gauge-num" id="gVal">—</div>
+            <div class="gauge-unit">L / min</div>
+          </div>
+        </div>
+        <div class="pill" id="pill">AWAITING DATA</div>
+        <div class="drops" id="drops">
+          <span class="drop">💧</span>
+          <span class="drop">💧</span>
+          <span class="drop">💧</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart Card -->
+    <div class="card">
+      <div class="card-title">Flow History — Last 20 Readings</div>
+      <div class="chart-box">
+        <canvas id="myChart"></canvas>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- BOTTOM GRID -->
+  <div class="g-bot">
+
+    <!-- Controls -->
+    <div class="card">
+      <div class="card-title">Controls</div>
+
+      <div class="range-row">
+        <div class="range-head">
+          <span class="range-lbl">Flow Rate (L/min)</span>
+          <span class="range-num" id="rDisp">12.0</span>
+        </div>
+        <input type="range" id="slider" min="0" max="60" step="0.5" value="12"/>
+        <div class="range-ends">
+          <span>0</span><span>Normal: 8–15</span><span>60</span>
+        </div>
+      </div>
+
+      <div class="divider">or type manually</div>
+
+      <div class="manual">
+        <input type="number" class="field" id="numInput" placeholder="e.g. 35.5" min="0" step="0.1"/>
+      </div>
+
+      <button class="btn btn-p" id="checkBtn">▶ CHECK FOR LEAK</button>
+      <button class="btn btn-s" id="simBtn">⟳ AUTO SIMULATE — OFF</button>
+    </div>
+
+    <!-- Log -->
+    <div class="card">
+      <div class="card-title">Reading Log</div>
+      <ul class="log-list" id="logList">
+        <li class="log-placeholder" id="logEmpty">No readings yet — send a flow value to begin.</li>
+      </ul>
+    </div>
+
+  </div>
+
+</div><!-- /page -->
+
+<div class="toast" id="toast"></div>
+
+<script>
+  /* ── Config ── */
+  const API     = 'http://127.0.0.1:5000/predict';
+  const CIRC    = 2 * Math.PI * 90;   // 565.49…
+  const MAX_PTS = 20;
+
+  /* ── State ── */
+  let total = 0, leaks = 0, simTimer = null;
+  const hist = { labels: [], data: [], colors: [] };
+
+  /* ── Helpers ── */
+  const $ = id => document.getElementById(id);
+
+  /* ── Slider sync ── */
+  function setSlider(v) {
+    const pct = (Math.min(+v, 60) / 60 * 100).toFixed(1) + '%';
+    $('slider').style.setProperty('--pct', pct);
+    $('rDisp').textContent = parseFloat(v).toFixed(1);
+  }
+  $('slider').addEventListener('input', () => {
+    setSlider($('slider').value);
+    $('numInput').value = $('slider').value;
+  });
+  $('numInput').addEventListener('input', () => {
+    const v = parseFloat($('numInput').value);
+    if (!isNaN(v) && v >= 0 && v <= 60) { $('slider').value = v; setSlider(v); }
+  });
+  setSlider(12);
+
+  /* ── Chart ── */
+  const chart = new Chart($('myChart').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: hist.labels,
+      datasets: [{
+        data: hist.data,
+        borderColor: 'rgba(0,170,255,.75)',
+        backgroundColor: ctx => {
+          const g = ctx.chart.ctx.createLinearGradient(0,0,0,220);
+          g.addColorStop(0,'rgba(0,170,255,.14)');
+          g.addColorStop(1,'rgba(0,170,255,0)');
+          return g;
+        },
+        pointBackgroundColor: hist.colors,
+        pointBorderColor: 'transparent',
+        pointRadius: 5, pointHoverRadius: 8,
+        tension: .42, fill: true, borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 450 },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#0d1a26', borderColor: '#1a3050', borderWidth: 1,
+          titleColor: '#6a90b0', bodyColor: '#c8dff0',
+          titleFont: { family: 'DM Mono', size: 10 },
+          bodyFont:  { family: 'DM Mono', size: 11 },
+          callbacks: { label: c => ` Flow: ${c.parsed.y} L/min` }
+        }
+      },
+      scales: {
+        x: { ticks: { color:'#344f66', font:{family:'DM Mono',size:9}, maxRotation:0 }, grid:{color:'#122133'} },
+        y: { min:0, max:65, ticks:{color:'#344f66',font:{family:'DM Mono',size:9}}, grid:{color:'#122133'} }
+      }
+    }
+  });
+
+  /* ── Gauge ── */
+  function setGauge(flow, isLeak) {
+    const pct = Math.min(+flow / 60, 1);
+    const arc = $('gArc');
+    arc.style.strokeDashoffset = CIRC * (1 - pct);
+    arc.style.stroke = isLeak ? 'var(--leak)' : 'var(--safe)';
+    arc.style.filter = `drop-shadow(0 0 10px ${isLeak ? 'var(--leak)' : 'var(--safe)'})`;
+    $('gVal').textContent = parseFloat(flow).toFixed(1);
+    $('gVal').style.color = isLeak ? 'var(--leak)' : '#fff';
+  }
+
+  /* ── Pill ── */
+  function setPill(isLeak, text) {
+    const p = $('pill');
+    p.textContent = text;
+    p.className   = 'pill ' + (isLeak ? 'bad' : 'ok');
+    $('drops').querySelectorAll('.drop').forEach(d => {
+      d.className = 'drop' + (isLeak ? ' fast' : '');
+    });
+    const a = $('alertBox');
+    isLeak ? a.classList.add('on') : a.classList.remove('on');
+  }
+
+  /* ── Stats ── */
+  function refreshStats(flow, isLeak) {
+    $('sFlow').textContent  = parseFloat(flow).toFixed(2);
+    $('sTotal').textContent = total;
+    $('sLeaks').textContent = leaks;
+    $('sLast').textContent  = isLeak ? 'LEAK' : 'NORMAL';
+    $('sLast').style.color  = isLeak ? 'var(--leak)' : 'var(--safe)';
+  }
+
+  /* ── Log ── */
+  function addLog(flow, isLeak, status) {
+    $('logEmpty')?.remove();
+    const ts = new Date().toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    const li = document.createElement('li');
+    li.className = 'log-item' + (isLeak ? ' bad' : '');
+    li.innerHTML = `
+      <span class="log-flow"><b>${parseFloat(flow).toFixed(2)}</b> L/min</span>
+      <span class="${isLeak ? 'log-bad' : 'log-ok'}">${status}</span>
+      <span class="log-ts">${ts}</span>`;
+    $('logList').prepend(li);
+    const all = $('logList').querySelectorAll('.log-item');
+    if (all.length > 60) all[all.length-1].remove();
+  }
+
+  /* ── Chart push ── */
+  function pushChart(flow, isLeak) {
+    const ts = new Date().toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    if (hist.labels.length >= MAX_PTS) { hist.labels.shift(); hist.data.shift(); hist.colors.shift(); }
+    hist.labels.push(ts);
+    hist.data.push(parseFloat(flow).toFixed(2));
+    hist.colors.push(isLeak ? '#ff4040' : '#00e0a0');
+    chart.update();
+  }
+
+  /* ── Toast ── */
+  let tTimer;
+  function toast(msg) {
+    const t = $('toast'); t.textContent = msg;
+    t.classList.add('on');
+    clearTimeout(tTimer);
+    tTimer = setTimeout(() => t.classList.remove('on'), 4000);
+  }
+
+  /* ── Predict ── */
+  async function predict(flowValue) {
+    const flow = parseFloat(flowValue);
+    if (isNaN(flow) || flow < 0) { toast('⚠️ Enter a valid flow value (0 or above).'); return; }
+
+    $('checkBtn').disabled = true;
+    $('checkBtn').textContent = '⏳ CHECKING…';
+
+    try {
+      const res = await fetch(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flow })
+      });
+
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        toast('API Error: ' + (e.error || `HTTP ${res.status}`));
+        return;
+      }
+
+      const json   = await res.json();
+      const isLeak = json.status.includes('Leak');
+
+      total++;
+      if (isLeak) leaks++;
+
+      setGauge(json.flow, isLeak);
+      setPill(isLeak, json.status);
+      refreshStats(json.flow, isLeak);
+      addLog(json.flow, isLeak, json.status);
+      pushChart(json.flow, isLeak);
+
+    } catch (err) {
+      toast('❌ Cannot reach Flask server. Run: python app.py');
+    } finally {
+      $('checkBtn').disabled = false;
+      $('checkBtn').textContent = '▶ CHECK FOR LEAK';
+    }
+  }
+
+  /* ── Button ── */
+  $('checkBtn').addEventListener('click', () => {
+    const v = $('numInput').value !== '' ? $('numInput').value : $('slider').value;
+    predict(v);
+  });
+
+  /* ── Simulate ── */
+  function randFlow() {
+    return Math.random() < 0.3
+      ? +(20 + Math.random() * 40).toFixed(2)
+      : +(8  + Math.random() * 7 ).toFixed(2);
+  }
+
+  $('simBtn').addEventListener('click', () => {
+    if (simTimer) {
+      clearInterval(simTimer);
+      simTimer = null;
+      $('simBtn').textContent = '⟳ AUTO SIMULATE — OFF';
+      $('simBtn').classList.remove('on');
+    } else {
+      $('simBtn').textContent = '■ STOP SIMULATION';
+      $('simBtn').classList.add('on');
+      const fire = () => {
+        const f = randFlow();
+        $('slider').value  = Math.min(f, 60); setSlider(Math.min(f, 60));
+        $('numInput').value = f;
+        predict(f);
+      };
+      fire();
+      simTimer = setInterval(fire, 2000);
+    }
+  });
+</script>
+</body>
+</html>
