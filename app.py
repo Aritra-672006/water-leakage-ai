@@ -7,7 +7,7 @@
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS          # pip install flask-cors
-from model import load_model, predict_leak
+from detection import load_model, predict_leak
 
 app = Flask(__name__)
 CORS(app)   # allows the frontend (index.html) to call this API
